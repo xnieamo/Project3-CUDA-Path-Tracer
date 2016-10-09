@@ -27,6 +27,7 @@ struct Geom {
     glm::mat4 inverseTransform;
     glm::mat4 invTranspose;
 		float surfaceArea;
+		int isLight = 0;
 };
 
 struct Material {
@@ -65,6 +66,7 @@ struct PathSegment {
 	glm::vec3 color;
 	int pixelIndex;
 	int remainingBounces;
+	float throughput;
 };
 
 // Use with a corresponding PathSegment to do:
@@ -75,4 +77,5 @@ struct ShadeableIntersection {
   glm::vec3 surfaceNormal;
   int materialId;
 	glm::vec3 intersect;
+	float surfaceArea;
 };
