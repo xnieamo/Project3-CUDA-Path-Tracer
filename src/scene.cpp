@@ -3,6 +3,7 @@
 #include <cstring>
 #include <glm/gtc/matrix_inverse.hpp>
 #include <glm/gtx/string_cast.hpp>
+#include <math.h>
 
 Scene::Scene(string filename) {
     cout << "Reading scene from " << filename << " ..." << endl;
@@ -74,6 +75,29 @@ int Scene::loadGeom(string objectid) {
                 newGeom.rotation = glm::vec3(atof(tokens[1].c_str()), atof(tokens[2].c_str()), atof(tokens[3].c_str()));
             } else if (strcmp(tokens[0].c_str(), "SCALE") == 0) {
                 newGeom.scale = glm::vec3(atof(tokens[1].c_str()), atof(tokens[2].c_str()), atof(tokens[3].c_str()));
+								// While we're here, calculate the surface areas
+								if (newGeom.type == CUBE) {
+									// Just 2 * (xy + yz + zx)
+									newGeom.surfaceArea = 2.f * (newGeom.scale[0] * newGeom.scale[1] + 
+																						 newGeom.scale[1] * newGeom.scale[2] + 
+																						 newGeom.scale[2] * newGeom.scale[0]);
+								}
+								else if (newGeom.type == SPHERE) {
+									// Spheres are a bit more complicated because they can be ellipsoids.
+									// We follow the following formula, S = 4 * PI * ((ab^1.6 + ac^1.6 + bc^1.6)/3)^(1/1.6)
+
+									// Get the radii. Making the assumption that these are unit spheres with radius 0.5
+									float rx = newGeom.scale[0] / 2.f;
+									float ry = newGeom.scale[0] / 2.f;
+									float rz = newGeom.scale[0] / 2.f;
+
+									// Calculate the terms for the formula and then the surface area.
+									float ab = std::pow(rx * ry, 1.6f);
+									float ac = std::pow(rx * rz, 1.6f);
+									float bc = std::pow(ry * rz, 1.6f);
+
+									newGeom.surfaceArea = 4 * PI * std::pow((ab + ac + bc) / 3.f, 1.f / 1.6f);
+								}
             }
 
             utilityCore::safeGetline(fp_in, line);
