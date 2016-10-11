@@ -337,6 +337,9 @@ thrust::default_random_engine &rng){
 		if (lightPdf > 0.f && glm::length(lightContribution) > 0.f && brdfPdf > 0.f && glm::length(brdfContribution) > 0.f) {
 			float dot_pdf = glm::abs(glm::dot(wi, glm::normalize(objIntersect.surfaceNormal))) / lightPdf;
 			float w = powerHeuristic(lightPdf, brdfPdf);
+#if !MIS
+			w = 1.f;
+#endif
 			col += w * brdfContribution * lightContribution * dot_pdf * (float)num_lights;
 		}
 	}
