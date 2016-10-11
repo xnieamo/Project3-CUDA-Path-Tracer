@@ -384,13 +384,13 @@ thrust::default_random_engine &rng){
 		pathSegment.remainingBounces = 0;
 	}
 
-	// Russian Roulette!
-	if (pathSegment.remainingBounces == 0) {
-		thrust::uniform_real_distribution<float> u01(0, 1);
-		float maxTP = glm::max(pathSegment.throughput[0], glm::max(pathSegment.throughput[1], pathSegment.throughput[2]));
-		if (u01(rng) > glm::min(0.5f, maxTP))
-			pathSegment.remainingBounces = 0;
-	}
+	//// Russian Roulette!
+	//if (pathSegment.remainingBounces == 0) {
+	//	thrust::uniform_real_distribution<float> u01(0, 1);
+	//	float maxTP = glm::max(pathSegment.throughput[0], glm::max(pathSegment.throughput[1], pathSegment.throughput[2]));
+	//	if (u01(rng) > glm::min(0.5f, maxTP))
+	//		pathSegment.remainingBounces = 0;
+	//}
 
 
 	// Update throughput

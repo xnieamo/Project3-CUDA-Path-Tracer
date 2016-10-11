@@ -686,7 +686,7 @@ void pathtrace(uchar4 *pbo, int frame, int iter) {
 		cudaEventElapsedTime(&milliseconds, start, end);
 		total += milliseconds;
 		pathtract_time += milliseconds;
-		//printf("Path tracing: %4.4f \n", milliseconds);
+		printf("Path tracing step: %4.4f \n", milliseconds);
 #endif
 
 #if STREAMCOMPACT
@@ -710,8 +710,8 @@ void pathtrace(uchar4 *pbo, int frame, int iter) {
 		cudaEventElapsedTime(&milliseconds, start, end);
 		total += milliseconds;
 		stream_time += milliseconds;
-		printf("Stream compaction: %4.4f \n", milliseconds);
-		printf("Stream compactions (paths remaining): %d\n", num_paths);
+		//printf("Stream compaction: %4.4f \n", milliseconds);
+		//printf("Stream compactions (paths remaining): %d\n", num_paths);
 #endif
 
 #endif
