@@ -26,8 +26,10 @@ The idea of direct illumination is to directly sample the light at each bounce b
 Base Renderer              |  Direct Illumination
 :-------------------------:|:-------------------------:
 ![](https://github.com/xnieamo/Project3-CUDA-Path-Tracer/blob/master/img/MIS-Comparisons/basic.2016-10-11_20-39-59z.10samp.png?raw=true)  |  ![](https://github.com/xnieamo/Project3-CUDA-Path-Tracer/blob/master/img/MIS-Comparisons/MIS.2016-10-11_20-38-05z.10samp.png?raw=true)
-![](https://github.com/xnieamo/Project3-CUDA-Path-Tracer/blob/master/img/MIS-Comparisons/basic.2016-10-11_20-40-13z.100samp.png?raw=true)  |  ![](https://github.com/xnieamo/Project3-CUDA-Path-Tracer/blob/master/img/MIS-Comparisons/MIS.2016-10-11_20-36-46z.100samp.png?raw=true)
-![](https://github.com/xnieamo/Project3-CUDA-Path-Tracer/blob/master/img/MIS-Comparisons/basic.2016-10-11_20-39-59z.500samp.png?raw=true)  |  ![](https://github.com/xnieamo/Project3-CUDA-Path-Tracer/blob/master/img/MIS-Comparisons/MIS.2016-10-11_20-32-42z.500samp.png?raw=true)
+![](https://github.com/xnieamo/Project3-CUDA-Path-Tracer/blob/master/img/MIS-Comparisons/basic.2016-10-11_20-50-11z.100samp.png?raw=true)  |  ![](https://github.com/xnieamo/Project3-CUDA-Path-Tracer/blob/master/img/MIS-Comparisons/MIS.2016-10-11_20-36-46z.100samp.png?raw=true)
+![](https://github.com/xnieamo/Project3-CUDA-Path-Tracer/blob/master/img/MIS-Comparisons/basic.2016-10-11_21-26-35z.500samp.png?raw=true)  |  ![](https://github.com/xnieamo/Project3-CUDA-Path-Tracer/blob/master/img/MIS-Comparisons/MIS.2016-10-11_20-32-42z.500samp.png?raw=true)
+
+It is clear that the direct illumination renderer gives a much nicer image at the same number of iterations.
 
 # Reference
 [PBRT] Physically Based Rendering, Second Edition: From Theory To Implementation. Pharr, Matt and Humphreys, Greg. 2010.
