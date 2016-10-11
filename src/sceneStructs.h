@@ -40,6 +40,7 @@ struct Material {
     float hasRefractive;
     float indexOfRefraction;
     float emittance;
+		float absorption;
 };
 
 struct Camera {
@@ -66,7 +67,8 @@ struct PathSegment {
 	glm::vec3 color;
 	int pixelIndex;
 	int remainingBounces;
-	float throughput;
+	glm::vec3 throughput;
+	bool inside;
 };
 
 // Use with a corresponding PathSegment to do:

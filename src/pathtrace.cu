@@ -15,7 +15,9 @@
 #include "interactions.h"
 
 #define ERRORCHECK 1
-#define DIRECTLIGHTING 0
+#define DIRECTLIGHTING 1
+#define CACHEFIRSTRAY 1
+#define ANTIALIAS 1
 
 #define FILENAME (strrchr(__FILE__, '/') ? strrchr(__FILE__, '/') + 1 : __FILE__)
 #define checkCUDAError(msg) checkCUDAErrorFn(msg, FILENAME, __LINE__)
@@ -78,6 +80,8 @@ static int numGeoms;
 // TODO: static variables for device memory, any extra info you need, etc
 //static PathSegment * dev_shadowFeelers = NULL;
 //static ShadeableIntersection * dev_shadow_intersections = NULL;
+static PathSegment * dev_first_cache = NULL;
+static bool firstCache = true;
 
 void pathtraceInit(Scene *scene) {
 	hst_scene = scene;
@@ -88,6 +92,7 @@ void pathtraceInit(Scene *scene) {
 	cudaMemset(dev_image, 0, pixelcount * sizeof(glm::vec3));
 
 	cudaMalloc(&dev_paths, pixelcount * sizeof(PathSegment));
+	cudaMalloc(&dev_first_cache, pixelcount * sizeof(PathSegment));
 	//cudaMalloc(&dev_shadowFeelers, pixelcount * sizeof(PathSegment));
 
 	numGeoms = scene->geoms.size();
@@ -116,7 +121,7 @@ void pathtraceFree() {
 	// TODO: clean up any extra device memory you created
 	//cudaFree(dev_shadowFeelers);
 	//cudaFree(dev_shadow_intersections);
-
+	cudaFree(dev_first_cache);
 	checkCUDAError("pathtraceFree");
 }
 
@@ -143,13 +148,24 @@ __global__ void generateRayFromCamera(Camera cam, int iter, int traceDepth, Path
 #else
 		segment.color = glm::vec3(1.0f, 1.0f, 1.0f);
 #endif
-		segment.throughput = 1.f;
+		segment.throughput = glm::vec3(1.f);
+		segment.inside = false;
+	
 
-		// TODO: implement antialiasing by jittering the ray
+#if ANTIALIAS
+		thrust::default_random_engine rng = makeSeededRandomEngine(iter, index, 0);
+		thrust::uniform_real_distribution<float> u01(0, 1);
+		segment.ray.direction = glm::normalize(cam.view
+			- cam.right * cam.pixelLength.x * ((float)x +  u01(rng) - (float)cam.resolution.x * 0.5f)
+			- cam.up * cam.pixelLength.y * ((float)y + u01(rng) - (float)cam.resolution.y * 0.5f)
+			);
+#else
 		segment.ray.direction = glm::normalize(cam.view
 			- cam.right * cam.pixelLength.x * ((float)x - (float)cam.resolution.x * 0.5f)
 			- cam.up * cam.pixelLength.y * ((float)y - (float)cam.resolution.y * 0.5f)
 			);
+#endif
+
 
 		segment.pixelIndex = index;
 		segment.remainingBounces = traceDepth;
@@ -286,7 +302,15 @@ __global__ void shadeMaterial(
 				Geom theLight = geoms[chosenLight];
 
 				// Generate a ray pointing towards that light
-				glm::vec3 lightPos = glm::vec3(theLight.transform * glm::vec4(0.f, 0.f, 0.f, 1.f));
+				glm::vec4 lp = glm::vec4(0.f, 0.f, 0.f, 1.f);
+				if (theLight.type == CUBE) {
+					lp = glm::vec4(sampleCube(rng), 1.f);
+				}
+				else if (theLight.type == SPHERE) {
+					lp = glm::vec4(sampleSphere(rng), 1.f);
+				}
+
+				glm::vec3 lightPos = glm::vec3(theLight.transform * lp);
 				PathSegment shadowFeeler;
 				shadowFeeler.ray.direction = glm::normalize(lightPos - intersection.intersect);
 				shadowFeeler.ray.origin = intersection.intersect + 0.01f * shadowFeeler.ray.direction;
@@ -441,8 +465,17 @@ void pathtrace(uchar4 *pbo, int frame, int iter) {
 	//   for you.
 
 	// TODO: perform one iteration of path tracing
-
+#if CACHEFIRSTRAY && !ANTIALIAS
+	if (firstCache) {
+		firstCache = false;
+		generateRayFromCamera << <blocksPerGrid2d, blockSize2d >> >(cam, iter, traceDepth, dev_first_cache);
+	}
+	dim3 numblocksPathCopy = (pixelcount + blockSize1d - 1) / blockSize1d;
+	copyPaths << <numblocksPathCopy, blockSize1d >> >(pixelcount, dev_first_cache, dev_paths);
+#else
 	generateRayFromCamera << <blocksPerGrid2d, blockSize2d >> >(cam, iter, traceDepth, dev_paths);
+#endif
+	
 	checkCUDAError("generate camera ray");
 
 	int depth = 0;
@@ -466,13 +499,11 @@ void pathtrace(uchar4 *pbo, int frame, int iter) {
 
 	// --- PathSegment Tracing Stage ---
 	// Shoot ray into scene, bounce between objects, push shading chunks
-	int num_shadowFeelers = 0;
 	bool iterationComplete = false;
 	while (!iterationComplete) {
 		
 		// clean shading chunks
 		cudaMemset(dev_intersections, 0, pixelcount * sizeof(ShadeableIntersection));
-		num_shadowFeelers = 0;
 
 		// tracing
 		dim3 numblocksPathSegmentTracing = (num_paths + blockSize1d - 1) / blockSize1d;
