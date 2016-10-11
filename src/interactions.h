@@ -3,6 +3,10 @@
 #include "intersections.h"
 #include <math.h>
 
+#define COSINESAMPLE 0
+#define MIS 0
+#define EARLYEXIT 0
+
 // CHECKITOUT
 /**
  * Computes a cosine-weighted random direction in a hemisphere.
@@ -45,6 +49,64 @@ glm::vec3 normal, thrust::default_random_engine &rng) {
 }
 
 __host__ __device__
+void concentricSampleDisc(float &u, float v){
+	float r, theta;
+
+	float sx = 2 * u - 1;
+	float sy = 2 * v - 1;
+
+	if (sx == 0.0 && sy == 0.0)
+	{
+		return;
+	}
+	if (sx >= -sy)
+	{
+		if (sx > sy)
+		{
+			// Handle first region of disk
+			r = sx;
+			if (sy > 0.0) theta = sy / r;
+			else          theta = 8.0f + sy / r;
+		}
+		else
+		{
+			// Handle second region of disk
+			r = sy;
+			theta = 2.0f - sx / r;
+		}
+	}
+	else
+	{
+		if (sx <= sy)
+		{
+			// Handle third region of disk
+			r = -sx;
+			theta = 4.0f - sy / r;
+		}
+		else
+		{
+			// Handle fourth region of disk
+			r = -sy;
+			theta = 6.0f + sx / r;
+		}
+	}
+	theta *= PI / 4.f;
+	u = r * glm::cos(theta);
+	v = r * glm::sin(theta);
+}
+
+__host__ __device__
+glm::vec3 cosineSemiHemisphere(thrust::default_random_engine &rng) {
+	thrust::uniform_real_distribution<float> u01(0, 1);
+	float u = u01(rng);
+	float v = u01(rng);
+
+	concentricSampleDisc(u, v);
+	float z = glm::sqrt(glm::max(0.f, 1.f - u*u - v*v));
+	return glm::vec3(u, v, z);
+}
+
+__host__ __device__
 glm::vec3 lambertBxdf(glm::vec3 in, glm::vec3 out, const Material &m){
 	return m.color / PI;
 }
@@ -76,7 +138,7 @@ glm::vec3 fresnelDielectricBxdf(glm::vec3 in, glm::vec3 out, glm::vec3 normal, c
 		((etat * cosi) + (etai * cost));
 	float Rperp = ((etai * cosi) - (etat * cost)) /
 		((etai * cosi) + (etat * cost));
-	
+
 	float fresnel = (Rparl*Rparl + Rperp*Rperp) / 2.f;
 	return (etat * etat) / (etai * etai) * (1 - fresnel) * m.color / glm::abs(glm::dot(in, normal));
 }
@@ -155,7 +217,11 @@ thrust::default_random_engine &rng
 		pathSeg.ray.direction = glm::refract(pathSeg.ray.direction, normal, IOR);
 	}
 	else{
+#if COSINESAMPLE
+		pathSeg.ray.direction = glm::normalize(cosineSemiHemisphere(rng));
+#else
 		pathSeg.ray.direction = glm::normalize(calculateRandomDirectionInHemisphere(normal, rng));
+#endif
 	}
 
 	pathSeg.ray.origin = intersect + (0.01f * pathSeg.ray.direction);
@@ -229,78 +295,81 @@ thrust::default_random_engine &rng){
 	// Temp color
 	glm::vec3 col;
 
-	// Don't really do anything for refractive item?
+	// Direct lighting part
+	glm::vec3 wi = glm::normalize(shadowFeeler.ray.direction);
+	glm::vec3 lightContribution;
+	glm::vec3 brdfContribution;
+	float lightPdf = -0.001f;
+	float brdfPdf = -0.001f;
 
-	if (true) {
-		// Direct lighting part
-		glm::vec3 wi = glm::normalize(shadowFeeler.ray.direction);
-		glm::vec3 lightContribution;
-		glm::vec3 brdfContribution;
-		float lightPdf = -0.001f;
-		float brdfPdf = -0.001f;
+#if MIS
+	// We actually hit a light with our shadow feeler! Here we calculate the lighting sample.
+	if (lightIntersect.t > 0.f && lm.emittance > 0.f) {
 
+		lightContribution = lightEnergy(wi, lightIntersect.surfaceNormal, lm);
+		lightPdf = lightPDF(wi, lightIntersect.surfaceNormal, lightIntersect.intersect,
+			shadowFeeler.ray.origin, lightIntersect.surfaceArea);
 
-		// We actually hit a light with our shadow feeler! Here we calculate the lighting sample.
-		if (lightIntersect.t > 0.f && lm.emittance > 0.f) {
-
-			lightContribution = lightEnergy(wi, lightIntersect.surfaceNormal, lm);
-			lightPdf = lightPDF(wi, lightIntersect.surfaceNormal, lightIntersect.intersect,
-				shadowFeeler.ray.origin, lightIntersect.surfaceArea);
-
-			sampleBxdf(brdfContribution, brdfPdf, wi, pathSegment.ray.direction
-				, objIntersect.surfaceNormal, m, rng, 0.f);
-
-			if (lightPdf > 0.f && glm::length(lightContribution) > 0.f && brdfPdf > 0.f && glm::length(brdfContribution) > 0.f) {
-				float dot_pdf = glm::abs(glm::dot(-wi, glm::normalize(objIntersect.surfaceNormal))) / lightPdf;
-				float w = powerHeuristic(lightPdf, brdfPdf);
-				col += w * brdfContribution * lightContribution * dot_pdf * (float)num_lights;
-			}
-		}
-		else {
-			col = glm::vec3(0.f);
-		}
-
-		// Reset variables
-		wi = glm::vec3(0.f);
-		brdfContribution = glm::vec3(0.f);
-		lightContribution = glm::vec3(0.f);
-		lightPdf = 0.f;
-		brdfPdf = 0.f;
-
-		// Compute brdf contribution
-		wi = glm::normalize(brdfSample.ray.direction);
 		sampleBxdf(brdfContribution, brdfPdf, wi, pathSegment.ray.direction
-			, objIntersect.surfaceNormal, m, rng, 1.f);
+			, objIntersect.surfaceNormal, m, rng, 0.f);
 
-		if (brdfPdf > 0.f && glm::length(brdfContribution) > 0.f) {
-			// Brdf sample hit a light
-			if (brdfIntersect.t > 0.f && bm.emittance > 0.f) {
-				lightContribution = lightEnergy(wi, brdfIntersect.surfaceNormal, bm);
-				lightPdf = lightPDF(wi, brdfIntersect.surfaceNormal, brdfIntersect.intersect, brdfSample.ray.origin, brdfIntersect.surfaceArea);
-
-				if (lightPdf > 0.f && glm::length(lightContribution) > 0.f) {
-					float dot_pdf = glm::max(0.f, glm::abs(glm::dot(wi, glm::normalize(objIntersect.surfaceNormal)))) / brdfPdf;
-					float w = powerHeuristic(brdfPdf, lightPdf);
-					col += w * brdfContribution * lightContribution * dot_pdf;
-				}
-			}
+		if (lightPdf > 0.f && glm::length(lightContribution) > 0.f && brdfPdf > 0.f && glm::length(brdfContribution) > 0.f) {
+			float dot_pdf = glm::abs(glm::dot(-wi, glm::normalize(objIntersect.surfaceNormal))) / lightPdf;
+			float w = powerHeuristic(lightPdf, brdfPdf);
+			col += w * brdfContribution * lightContribution * dot_pdf * (float)num_lights;
 		}
-
-		// Add new colors
-		pathSegment.color += pathSegment.throughput * col;
-
-		// Early exit
-		if (glm::length(brdfContribution) <= 0.f || brdfPdf <= 0.f) {
-			pathSegment.remainingBounces = 0;
-		}
-
-		// Update throughput
-		brdfContribution *= glm::abs(glm::dot(wi, objIntersect.surfaceNormal)) / (brdfPdf * 2.f);
-		pathSegment.throughput *= brdfContribution;
 	}
 	else {
-		pathSegment.throughput *= m.color;
+		col = glm::vec3(0.f);
 	}
+#endif
+
+	// Reset variables
+	wi = glm::vec3(0.f);
+	brdfContribution = glm::vec3(0.f);
+	lightContribution = glm::vec3(0.f);
+	lightPdf = 0.f;
+	brdfPdf = 0.f;
+
+	// Compute brdf contribution
+	wi = glm::normalize(brdfSample.ray.direction);
+	sampleBxdf(brdfContribution, brdfPdf, wi, pathSegment.ray.direction
+		, objIntersect.surfaceNormal, m, rng, 1.f);
+
+	if (brdfPdf > 0.f && glm::length(brdfContribution) > 0.f) {
+		// Brdf sample hit a light
+		if (brdfIntersect.t > 0.f && bm.emittance > 0.f) {
+			lightContribution = lightEnergy(wi, brdfIntersect.surfaceNormal, bm);
+			lightPdf = lightPDF(wi, brdfIntersect.surfaceNormal, brdfIntersect.intersect, brdfSample.ray.origin, brdfIntersect.surfaceArea);
+
+			if (lightPdf > 0.f && glm::length(lightContribution) > 0.f) {
+				float dot_pdf = glm::max(0.f, glm::abs(glm::dot(wi, glm::normalize(objIntersect.surfaceNormal)))) / brdfPdf;
+				float w = powerHeuristic(brdfPdf, lightPdf);
+				col += w * brdfContribution * lightContribution * dot_pdf;
+			}
+		}
+	}
+
+	// Add new colors
+	pathSegment.color += pathSegment.throughput * col;
+
+#if EARLYEXIT
+	// Early exit
+	if (glm::length(brdfContribution) <= 0.f || brdfPdf <= 0.f) {
+		pathSegment.remainingBounces = 0;
+	}
+
+	// Russian Roulette!
+	if (pathSegment.remainingBounces == 0) {
+		thrust::uniform_real_distribution<float> u01(0, 1);
+		if (u01(rng) > glm::min(0.5f, glm::length(pathSegment.throughput)))
+			pathSegment.remainingBounces = 0;
+	}
+#endif 
+
+	// Update throughput
+	brdfContribution *= glm::abs(glm::dot(wi, objIntersect.surfaceNormal)) / (brdfPdf * 2.f);
+	pathSegment.throughput *= brdfContribution;
 
 	// Set up new path segments
 	sampleBrdf(pathSegment,
@@ -310,12 +379,7 @@ thrust::default_random_engine &rng){
 		rng);
 	pathSegment.remainingBounces--;
 
-	// Russian Roulette!
-	if (pathSegment.remainingBounces == 0) {
-		thrust::uniform_real_distribution<float> u01(0, 1);
-		if (u01(rng) > glm::min(0.5f, glm::length(pathSegment.throughput)))
-			pathSegment.remainingBounces = 0;
-	}
+
 }
 
 __host__ __device__
