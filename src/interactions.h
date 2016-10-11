@@ -4,7 +4,7 @@
 #include <math.h>
 
 #define COSINESAMPLE 1
-#define MIS 0
+#define MIS 1
 
 // CHECKITOUT
 /**
@@ -391,6 +391,7 @@ thrust::default_random_engine &rng){
 		if (u01(rng) > glm::min(0.5f, maxTP))
 			pathSegment.remainingBounces = 0;
 	}
+
 
 	// Update throughput
 	brdfContribution *= glm::abs(glm::dot(wi, objIntersect.surfaceNormal)) / (brdfPdf * 2.f);

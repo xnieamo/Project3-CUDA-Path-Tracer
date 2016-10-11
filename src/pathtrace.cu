@@ -17,12 +17,12 @@
 #include "interactions.h"
 
 #define ERRORCHECK 1
-#define DIRECTLIGHTING 0
+#define DIRECTLIGHTING 1
 #define CACHEFIRSTRAY 1
 #define ANTIALIAS 1
 #define STREAMCOMPACT 1
 #define MATERIALSORT 0 // Doesn't work for some reason, breaks on sort_by_key
-#define TIME 0
+#define TIME 1
 #define LENSJITTER 0
 #define BLOCKSIZE 128
 
@@ -710,7 +710,7 @@ void pathtrace(uchar4 *pbo, int frame, int iter) {
 		cudaEventElapsedTime(&milliseconds, start, end);
 		total += milliseconds;
 		stream_time += milliseconds;
-		//printf("Stream compaction: %4.4f \n", milliseconds);
+		printf("Stream compaction: %4.4f \n", milliseconds);
 		printf("Stream compactions (paths remaining): %d\n", num_paths);
 #endif
 
