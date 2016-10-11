@@ -55,7 +55,36 @@ The direct illumination's runtime is fairly undesireable. Luckily, several of th
 </p>
 The plots show that the number of rays that need to be executed as the algorithm progress drops tremendously! While the first two stream compaction and path trace call take longer than without, all bounces from 3 and on take much less time than if we were to run the algorithm without stream compaction.  By reducing the number of rays as we continue, we save a lot of time. In fact, we nearly half our runtime (consider that the number of intersections calculated initially is also reduced).
 
+## First bounce caching
+Because we are sampling for many iterations, we can also cache the rays first cast from the camera. This is because the camera will always be in the same position when we render. This saves us time by removing the need to cast the initial set of rays on each iteration.  This naturally saves time as a function of the number of iterations we are running. Below is a plot of the time saved by caching the first rays for 10 iterations of the algorithm.
 
+<p align="center">
+  <img src="https://github.com/xnieamo/Project3-CUDA-Path-Tracer/blob/master/img/plots/FirstBounceCache.png?raw=true">
+</p>
+
+We save roughly 3 milliseconds per iteration when we cache the first bounces. For a 5000 iteration rendering, this amounts to roughly 15000 milliseconds save or about 43 (15000/350) additional iterations.  This seems like a fairly insignificant boost in performance, especially because caching the first ray cast will prevent us from performing anti-aliasing.
+
+## Anti-aliasing
+If we only cast our initial ray from a single location, aliasing can occur. This is when there may be multiple objects in a single pixel but only one gets sampled. The result is that lines and boundaries in the image may appear jagged.  To address this issue, we jitter our intial ray cast slightly within the pixel. This stochastic jittering let's us sample every object that may be in a pixel since our initial ray is no longer fixed. As just mentioned in the previous section, the we can no longer cache our first bounce.  One possible solution would be to cache a large amount of initial casts. However, if we do so, we always have a higher risk of aliasing! Personally, I think the first bounce caching doesn't provide enough of a benefit to make pre-allocating a large amount of space to store so many more rays worthwhile. Below are two images, one anti-aliased, one not. Notice how the edges of the box are jagged in the non-aliased version.
+
+IMAGE
+
+Because anti-aliasing is something that occurs at the start of each iteration, it is essentially free! (minus 2 random number generations). Unless we were caching our initial bounces, there are no performance tradeoffs for this feature.
+
+
+## Depth of field
+Depth of field refers to the blurring affect on objects not within the same plane of focus. We can mimic the effect of depth of field by slightly jittering our inital ray cast through an imaginary lens. The image below shows the result. Notice how the objects become less blurry the further away the are from the camera. This occurs if our focus is far away.
+
+IMAGE
+
+Similar to anti-aliasing, there are no performance costs for this feature because it is a ray pre-processing step.
+
+## Reflection/Refraction
+We make use of two Fresnel equations to implement reflective and refractive materials. Note that the Fresnel implementations are only available in the direct illumination renderer. The basic renderer just assumes perfectly specular surfaces and uses Snell's law to calculate refracted rays. For reflections, we assume the material to be a Fresnel conductor. For refractions, we assume a Fresnel dielecctric.  The formula for the two materials are as follows:
+
+FORUMLAS
+
+We use an approximation of the two equations [PBRT 8.2-8.3] in our implementations. Below is a plot showing the effects of the Fresnel equations on our runtime.
 
 # Reference
 [PBRT] Physically Based Rendering, Second Edition: From Theory To Implementation. Pharr, Matt and Humphreys, Greg. 2010.
