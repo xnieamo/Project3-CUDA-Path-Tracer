@@ -5,6 +5,7 @@
 
 #define COSINESAMPLE 1
 #define MIS 1
+#define FRESNEL 0;
 
 // CHECKITOUT
 /**
@@ -192,11 +193,19 @@ glm::vec3 &bxdf
 
 	float r = u01(rng);
 	if (r < m.hasReflective / matType) {
+#if FRESNEL
 		bxdf = bxdfContrib > 0 ? fresnelConductorBxdf(in, normal, m) : glm::vec3(0.f);
+#else
+		bxdf = bxdfContrib > 0 ? perfectSpecularBxdf(in, normal, m) : glm::vec3(0.f);
+#endif
 		pdf = bxdfContrib > 0 ? 1.f : perfectSpecularPDF(in, out, normal);
 	}
 	else if (r < (m.hasRefractive + m.hasReflective) / matType) {
+#if FRESNEL
 		bxdf = bxdfContrib > 0 ? fresnelDielectricBxdf(in, out, normal, m) : glm::vec3(0.f);
+#else
+		bxdf = bxdfContrib > 0 ? perfectSpecularBxdf(in, normal, m) : glm::vec3(0.f);
+#endif
 		pdf = bxdfContrib > 0 ? 1.f : 0.f;
 	}
 	else {
@@ -334,23 +343,15 @@ thrust::default_random_engine &rng){
 		sampleBxdf(brdfContribution, brdfPdf, wi, pathSegment.ray.direction
 			, objIntersect.surfaceNormal, m, rng, 0.f);
 
-#if !MIS
-		lightPdf = brdfPdf; //If we aren't doing MIS, I think the pdf is just the bxdf pdf?
-#endif
-
 		if (lightPdf > 0.f && glm::length(lightContribution) > 0.f && brdfPdf > 0.f && glm::length(brdfContribution) > 0.f) {
 			float dot_pdf = glm::abs(glm::dot(wi, glm::normalize(objIntersect.surfaceNormal))) / lightPdf;
 			float w = powerHeuristic(lightPdf, brdfPdf);
-#if !MIS
-			w = 1.f;
-#endif
 			col += w * brdfContribution * lightContribution * dot_pdf * (float)num_lights;
 		}
 	}
 	else {
 		col = glm::vec3(0.f);
 	}
-
 
 	// Reset variables
 	wi = glm::vec3(0.f);
