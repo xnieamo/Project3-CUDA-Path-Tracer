@@ -334,6 +334,10 @@ thrust::default_random_engine &rng){
 		sampleBxdf(brdfContribution, brdfPdf, wi, pathSegment.ray.direction
 			, objIntersect.surfaceNormal, m, rng, 0.f);
 
+#if !MIS
+		lightPdf = brdfPdf; //If we aren't doing MIS, I think the pdf is just the bxdf pdf?
+#endif
+
 		if (lightPdf > 0.f && glm::length(lightContribution) > 0.f && brdfPdf > 0.f && glm::length(brdfContribution) > 0.f) {
 			float dot_pdf = glm::abs(glm::dot(wi, glm::normalize(objIntersect.surfaceNormal))) / lightPdf;
 			float w = powerHeuristic(lightPdf, brdfPdf);

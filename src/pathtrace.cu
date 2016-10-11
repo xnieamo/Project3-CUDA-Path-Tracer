@@ -22,8 +22,8 @@
 #define ANTIALIAS 1
 #define STREAMCOMPACT 1
 #define MATERIALSORT 0 // Doesn't work for some reason, breaks on sort_by_key
-#define TIME 1
-#define LENSJITTER 0
+#define TIME 0
+#define LENSJITTER 1
 #define BLOCKSIZE 128
 
 #define FILENAME (strrchr(__FILE__, '/') ? strrchr(__FILE__, '/') + 1 : __FILE__)
