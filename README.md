@@ -75,16 +75,18 @@ Because anti-aliasing is something that occurs at the start of each iteration, i
 ## Depth of field
 Depth of field refers to the blurring affect on objects not within the same plane of focus. We can mimic the effect of depth of field by slightly jittering our inital ray cast through an imaginary lens. The image below shows the result. Notice how the objects become less blurry the further away the are from the camera. This occurs if our focus is far away.
 
-IMAGE
+<p align="center">
+  <img src="https://github.com/xnieamo/Project3-CUDA-Path-Tracer/blob/master/img/depth.2016-10-11_22-51-27z.5000samp.png?raw=true">
+</p>
+
 
 Similar to anti-aliasing, there are no performance costs for this feature because it is a ray pre-processing step.
 
 ## Reflection/Refraction
 We make use of two Fresnel equations to implement reflective and refractive materials. Note that the Fresnel implementations are only available in the direct illumination renderer. The basic renderer just assumes perfectly specular surfaces and uses Snell's law to calculate refracted rays. For reflections, we assume the material to be a Fresnel conductor. For refractions, we assume a Fresnel dielecctric.  The formula for the two materials are as follows:
+<img src="https://github.com/xnieamo/Project3-CUDA-Path-Tracer/blob/master/img/equations/Cond.PNG?raw=true" width="425"/> <img src="https://github.com/xnieamo/Project3-CUDA-Path-Tracer/blob/master/img/equations/Diel.PNG?raw=true" width="350"/> 
 
-FORUMLAS
-
-We use an approximation of the two equations [PBRT 8.2-8.3] in our implementations. Below is a plot showing the effects of the Fresnel equations on our runtime.
+We use an approximation of the two equations [PBRT 8.2-8.3] in our implementations. Additionally, the Fresnel equations are relatively cheap. The runtime assuming a perfect specular material is only 3.5 milliseconds faster per iteration. This means that the Fresnel materials are essentially free!
 
 # Reference
 [PBRT] Physically Based Rendering, Second Edition: From Theory To Implementation. Pharr, Matt and Humphreys, Greg. 2010.
