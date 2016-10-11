@@ -36,10 +36,26 @@ It is clear that the direct illumination renderer gives a much nicer image at th
   <img src="https://github.com/xnieamo/Project3-CUDA-Path-Tracer/blob/master/img/plots/BasicRenderer-DL-Time.png?raw=true">
 </p>
 
-Shockingly, the time taken for the actual path tracing is now over 10 times greater than the basic renderer! Overall, this the direct illumination renderer takes about 3 times longer per iteration, so we could have run the basic renderer for that many more iterations giving the same time. Below, I ran the basic renderer for 1500 iterations, compared to a 500 iteration image from the direct illumination renderer.
+Shockingly, the time taken for the actual path tracing is now over 10 times greater than the basic renderer! Overall, this the direct illumination renderer takes about 3 times longer per iteration, so we could have run the basic renderer for that many more iterations giving the same time. Below, I ran the basic renderer for 1500 iterations, compared to a 500 iteration image from the direct illumination renderer. Even with 1000 extra iterations, the direct illumination renderer looks a bit better.
+
+Base Renderer 1500 iter    |  Direct Illumination 500 iter
+:-------------------------:|:-------------------------:
+![](https://github.com/xnieamo/Project3-CUDA-Path-Tracer/blob/master/img/MIS-Comparisons/basic.2016-10-11_21-52-13z.1500samp.png?raw=true)  |  ![](https://github.com/xnieamo/Project3-CUDA-Path-Tracer/blob/master/img/MIS-Comparisons/MIS.2016-10-11_20-32-42z.500samp.png?raw=true)
 
 ## Path termination via stream compaction
 The direct illumination's runtime is fairly undesireable. Luckily, several of the other features in this project allow us drastically reduce the runtime. The first feature is path termination. The idea is to remove paths that have terminated (hit a light source or finished all their bounces) each time before we execute the path tracing kernel. In theory, this reduces the number of threads that need to be executed as the rays are evaluated. We use`thrust::partition` to perform stream compaction on the rays that have terminated. Here is a plot of the number of rays remaining, as well as the executition time of a single kernel call against the bounce number.
+<p align="center">
+<img src="https://github.com/xnieamo/Project3-CUDA-Path-Tracer/blob/master/img/plots/SCRayCount.png?raw=true"/> 
+<br><br>
+<img src="https://github.com/xnieamo/Project3-CUDA-Path-Tracer/blob/master/img/plots/SCRuntime.png?raw=true"/> 
+</p>
+
+<p align="center">
+  <img src="https://github.com/xnieamo/Project3-CUDA-Path-Tracer/blob/master/img/plots/WithStreamCompaction.png?raw=true">
+</p>
+The plots show that the number of rays that need to be executed as the algorithm progress drops tremendously! While the first two stream compaction and path trace call take longer than without, all bounces from 3 and on take much less time than if we were to run the algorithm without stream compaction.  By reducing the number of rays as we continue, we save a lot of time. In fact, we nearly half our runtime (consider that the number of intersections calculated initially is also reduced).
+
+
 
 # Reference
 [PBRT] Physically Based Rendering, Second Edition: From Theory To Implementation. Pharr, Matt and Humphreys, Greg. 2010.
