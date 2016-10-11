@@ -3,9 +3,8 @@
 #include "intersections.h"
 #include <math.h>
 
-#define COSINESAMPLE 0
-#define MIS 0
-#define EARLYEXIT 0
+#define COSINESAMPLE 1
+#define MIS 1
 
 // CHECKITOUT
 /**
@@ -96,14 +95,37 @@ void concentricSampleDisc(float &u, float v){
 }
 
 __host__ __device__
-glm::vec3 cosineSemiHemisphere(thrust::default_random_engine &rng) {
+glm::vec3 cosineSemiHemisphere(glm::vec3 normal, thrust::default_random_engine &rng) {
 	thrust::uniform_real_distribution<float> u01(0, 1);
 	float u = u01(rng);
 	float v = u01(rng);
 
 	concentricSampleDisc(u, v);
 	float z = glm::sqrt(glm::max(0.f, 1.f - u*u - v*v));
-	return glm::vec3(u, v, z);
+
+	// Find a direction that is not the normal based off of whether or not the
+	// normal's components are all equal to sqrt(1/3) or whether or not at
+	// least one component is less than sqrt(1/3). Learned this trick from
+	// Peter Kutz.
+
+	glm::vec3 directionNotNormal;
+	if (abs(normal.x) < SQRT_OF_ONE_THIRD) {
+		directionNotNormal = glm::vec3(1, 0, 0);
+	}
+	else if (abs(normal.y) < SQRT_OF_ONE_THIRD) {
+		directionNotNormal = glm::vec3(0, 1, 0);
+	}
+	else {
+		directionNotNormal = glm::vec3(0, 0, 1);
+	}
+
+	// Use not-normal direction to generate two perpendicular directions
+	glm::vec3 perpendicularDirection1 =
+		glm::normalize(glm::cross(normal, directionNotNormal));
+	glm::vec3 perpendicularDirection2 =
+		glm::normalize(glm::cross(normal, perpendicularDirection1));
+
+	return u * perpendicularDirection1 + v * perpendicularDirection2 + z * normal;
 }
 
 __host__ __device__
@@ -218,7 +240,7 @@ thrust::default_random_engine &rng
 	}
 	else{
 #if COSINESAMPLE
-		pathSeg.ray.direction = glm::normalize(cosineSemiHemisphere(rng));
+		pathSeg.ray.direction = glm::normalize(cosineSemiHemisphere(normal, rng));
 #else
 		pathSeg.ray.direction = glm::normalize(calculateRandomDirectionInHemisphere(normal, rng));
 #endif
@@ -302,7 +324,6 @@ thrust::default_random_engine &rng){
 	float lightPdf = -0.001f;
 	float brdfPdf = -0.001f;
 
-#if MIS
 	// We actually hit a light with our shadow feeler! Here we calculate the lighting sample.
 	if (lightIntersect.t > 0.f && lm.emittance > 0.f) {
 
@@ -314,7 +335,7 @@ thrust::default_random_engine &rng){
 			, objIntersect.surfaceNormal, m, rng, 0.f);
 
 		if (lightPdf > 0.f && glm::length(lightContribution) > 0.f && brdfPdf > 0.f && glm::length(brdfContribution) > 0.f) {
-			float dot_pdf = glm::abs(glm::dot(-wi, glm::normalize(objIntersect.surfaceNormal))) / lightPdf;
+			float dot_pdf = glm::abs(glm::dot(wi, glm::normalize(objIntersect.surfaceNormal))) / lightPdf;
 			float w = powerHeuristic(lightPdf, brdfPdf);
 			col += w * brdfContribution * lightContribution * dot_pdf * (float)num_lights;
 		}
@@ -322,7 +343,7 @@ thrust::default_random_engine &rng){
 	else {
 		col = glm::vec3(0.f);
 	}
-#endif
+
 
 	// Reset variables
 	wi = glm::vec3(0.f);
@@ -332,10 +353,12 @@ thrust::default_random_engine &rng){
 	brdfPdf = 0.f;
 
 	// Compute brdf contribution
+	// We need to do this to find out what the throughput should be decreased by
 	wi = glm::normalize(brdfSample.ray.direction);
 	sampleBxdf(brdfContribution, brdfPdf, wi, pathSegment.ray.direction
 		, objIntersect.surfaceNormal, m, rng, 1.f);
 
+#if MIS
 	if (brdfPdf > 0.f && glm::length(brdfContribution) > 0.f) {
 		// Brdf sample hit a light
 		if (brdfIntersect.t > 0.f && bm.emittance > 0.f) {
@@ -349,11 +372,10 @@ thrust::default_random_engine &rng){
 			}
 		}
 	}
-
+#endif
 	// Add new colors
 	pathSegment.color += pathSegment.throughput * col;
 
-#if EARLYEXIT
 	// Early exit
 	if (glm::length(brdfContribution) <= 0.f || brdfPdf <= 0.f) {
 		pathSegment.remainingBounces = 0;
@@ -362,10 +384,10 @@ thrust::default_random_engine &rng){
 	// Russian Roulette!
 	if (pathSegment.remainingBounces == 0) {
 		thrust::uniform_real_distribution<float> u01(0, 1);
-		if (u01(rng) > glm::min(0.5f, glm::length(pathSegment.throughput)))
+		float maxTP = glm::max(pathSegment.throughput[0], glm::max(pathSegment.throughput[1], pathSegment.throughput[2]));
+		if (u01(rng) > glm::min(0.5f, maxTP))
 			pathSegment.remainingBounces = 0;
 	}
-#endif 
 
 	// Update throughput
 	brdfContribution *= glm::abs(glm::dot(wi, objIntersect.surfaceNormal)) / (brdfPdf * 2.f);

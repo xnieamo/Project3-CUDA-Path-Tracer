@@ -4,6 +4,8 @@
 #include <thrust/execution_policy.h>
 #include <thrust/random.h>
 #include <thrust/remove.h>
+#include <thrust/device_vector.h>
+#include <thrust/sort.h>
 
 #include "sceneStructs.h"
 #include "scene.h"
@@ -15,11 +17,11 @@
 #include "interactions.h"
 
 #define ERRORCHECK 1
-#define DIRECTLIGHTING 1
-#define CACHEFIRSTRAY 0
-#define ANTIALIAS 0
-#define STREAMCOMPACT 0
-#define MATERIALSORT 0
+#define DIRECTLIGHTING 0
+#define CACHEFIRSTRAY 1
+#define ANTIALIAS 1
+#define STREAMCOMPACT 1
+#define MATERIALSORT 0 // Doesn't work for some reason, breaks on sort_by_key
 #define TIME 0
 #define LENSJITTER 0
 #define BLOCKSIZE 128
@@ -84,6 +86,7 @@ static ShadeableIntersection * dev_intersections = NULL;
 
 // For caching first bounce
 static PathSegment * dev_first_cache = NULL;
+static bool firstTime = true;
 
 // For material sorting
 static int * dev_materialIds = NULL;
@@ -303,7 +306,7 @@ __global__ void shadeMaterial(
 			Material material = materials[intersection.materialId];
 
 			// If the material indicates that the object was a light, "light" the ray
-			if (material.emittance > 0.001f) {
+			if (material.emittance > 0.f) {
 #if DIRECTLIGHTING
 				if (depth == 0) {
 					pathSegments[idx].color = pathSegments[idx].throughput * (material.color * material.emittance);
@@ -324,8 +327,17 @@ __global__ void shadeMaterial(
 				int chosenLight = (int)u0L(rng);
 				Geom theLight = geoms[chosenLight];
 
-				// Generate a ray pointing towards that light
+				// Do some independent operations. I think almost everything
+				// depends on this light, so just allocate some variables.
 				glm::vec4 lp = glm::vec4(0.f, 0.f, 0.f, 1.f);
+				PathSegment shadowFeeler;
+				ShadeableIntersection shadowIntersect;
+				ShadeableIntersection brdfIntersect;
+
+				// Load pathsegment here so we save some time
+				PathSegment brdfSample = pathSegments[idx];
+
+				// Generate a ray pointing towards that light
 				if (theLight.type == CUBE) {
 					lp = glm::vec4(sampleCube(rng), 1.f);
 				}
@@ -334,22 +346,18 @@ __global__ void shadeMaterial(
 				}
 
 				glm::vec3 lightPos = glm::vec3(theLight.transform * lp);
-				PathSegment shadowFeeler;
 				shadowFeeler.ray.direction = glm::normalize(lightPos - intersection.intersect);
 				shadowFeeler.ray.origin = intersection.intersect + 0.01f * shadowFeeler.ray.direction;
 
 				// This is our light intersection
-				ShadeableIntersection shadowIntersect;
 				computeSingleIntersection(shadowFeeler, geoms, num_geoms, shadowIntersect);
 			
 				// Now we need to sample the brdf once and see if that hits the light
-				PathSegment brdfSample = pathSegments[idx];
 				sampleBrdf(brdfSample,
 					intersection.intersect,
 					intersection.surfaceNormal,
 					material,
 					rng);
-				ShadeableIntersection brdfIntersect;
 				computeSingleIntersection(brdfSample, geoms, num_geoms, brdfIntersect);
 
 				// Do direct lighting
@@ -414,14 +422,6 @@ __global__ void finalGather(int nPaths, glm::vec3 * image, PathSegment * iterati
 	}
 }
 
-__global__ void copyPaths(int nPaths, PathSegment * original, PathSegment * copy)
-{
-	int idx = blockIdx.x * blockDim.x + threadIdx.x;
-	if (idx < nPaths){
-		copy[idx] = original[idx];
-	}
-}
-
 __global__ void findMaterialIds(int nPaths, int * ids, ShadeableIntersection * isx) {
 	int index = (blockIdx.x * blockDim.x) + threadIdx.x;
 
@@ -430,6 +430,7 @@ __global__ void findMaterialIds(int nPaths, int * ids, ShadeableIntersection * i
 		ids[index] = isx[index].materialId;
 	}
 }
+
 // Used for stream compaction in thrust::partition
 struct deadPaths
 {
@@ -498,6 +499,10 @@ void pathtrace(uchar4 *pbo, int frame, int iter) {
 #if TIME
 	float total = 0.f;
 	float milliseconds = 0.f;
+	float intersect_time = 0.f;
+	float pathtract_time = 0.f; 
+	float stream_time = 0.f;
+	float material_time = 0.f;
 	cudaEvent_t start, end;
 	printf("Iteration: %d\n", iter);
 #endif
@@ -509,11 +514,11 @@ void pathtrace(uchar4 *pbo, int frame, int iter) {
 #endif
 	// Generate rays depending on macro settings
 #if CACHEFIRSTRAY && !ANTIALIAS
-	if (iter == 1) {
+	if (firstTime) {
 		generateRayFromCamera << <blocksPerGrid2d, blockSize2d >> >(cam, iter, traceDepth, dev_first_cache);
+		firstTime = false;
 	}
-	dim3 numblocksPathCopy = (pixelcount + blockSize1d - 1) / blockSize1d;
-	copyPaths << <numblocksPathCopy, blockSize1d >> >(pixelcount, dev_first_cache, dev_paths);
+	cudaMemcpy(dev_paths, dev_first_cache, pixelcount * sizeof(PathSegment), cudaMemcpyDeviceToDevice);
 #else
 	generateRayFromCamera << <blocksPerGrid2d, blockSize2d >> >(cam, iter, traceDepth, dev_paths);
 #endif
@@ -531,7 +536,9 @@ void pathtrace(uchar4 *pbo, int frame, int iter) {
 	int depth = 0;
 	PathSegment* dev_path_end = dev_paths + pixelcount;
 	int num_paths = dev_path_end - dev_paths;
-
+#if TIME
+	printf("Starting number of paths: %d\n", num_paths);
+#endif
 
 	// --- Find lights for direct lighting ---
 	// 0. Realized this only needs to done once if you make numLights a global var!
@@ -598,7 +605,8 @@ void pathtrace(uchar4 *pbo, int frame, int iter) {
 		cudaEventSynchronize(end);
 		cudaEventElapsedTime(&milliseconds, start, end);
 		total += milliseconds;
-		printf("First round of intersections: %4.4f \n", milliseconds);
+		intersect_time += milliseconds;
+		//printf("Round of intersections: %4.4f \n", milliseconds);
 #endif
 		// TODO:
 		// --- Shading Stage ---
@@ -609,6 +617,50 @@ void pathtrace(uchar4 *pbo, int frame, int iter) {
 		// TODO: compare between directly shading the path segments and shading
 		// path segments that have been reshuffled to be contiguous in memory.
 
+		// --- Sort by material ---
+		// 1. Get IDs from the materials
+		// 2. Sort paths accordingly with thrust
+#if MATERIALSORT
+#if TIME
+		cudaEventCreate(&start);
+		cudaEventCreate(&end);
+		cudaEventRecord(start);
+#endif
+		findMaterialIds << <numblocksPathSegmentTracing, blockSize1d >> >(
+			num_paths,
+			dev_materialIds,
+			dev_intersections);
+#if TIME
+		cudaEventRecord(end);
+		cudaEventSynchronize(end);
+		cudaEventElapsedTime(&milliseconds, start, end);
+		total += milliseconds;
+		material_time += milliseconds;
+		printf("Material Sort (gather mat ids): %4.4f \n", milliseconds);
+#endif
+
+#if TIME
+		cudaEventCreate(&start);
+		cudaEventCreate(&end);
+		cudaEventRecord(start);
+#endif
+		thrust::device_ptr<int> dev_thrust_keys = thrust::device_pointer_cast(dev_materialIds);
+		thrust::device_ptr<PathSegment> dev_thrust_paths = thrust::device_pointer_cast(dev_paths);
+		thrust::device_ptr<ShadeableIntersection> dev_thrust_intersections = thrust::device_pointer_cast(dev_intersections);
+		checkCUDAError("Allocate thrust ptr");
+
+		thrust::stable_sort_by_key(dev_thrust_keys, dev_thrust_keys + num_paths, dev_thrust_paths);
+		//thrust::stable_sort_by_key(dev_thrust_keys, dev_thrust_keys + num_paths, dev_thrust_intersections);
+		//checkCUDAError("Sort materials");
+#if TIME
+		cudaEventRecord(end);
+		cudaEventSynchronize(end);
+		cudaEventElapsedTime(&milliseconds, start, end);
+		total += milliseconds;
+		material_time += milliseconds;
+		printf("Material Sort (sorting): %4.4f \n", milliseconds);
+#endif
+#endif
 
 #if TIME
 		cudaEventCreate(&start);
@@ -633,7 +685,8 @@ void pathtrace(uchar4 *pbo, int frame, int iter) {
 		cudaEventSynchronize(end);
 		cudaEventElapsedTime(&milliseconds, start, end);
 		total += milliseconds;
-		printf("Path tracing: %4.4f \n", milliseconds);
+		pathtract_time += milliseconds;
+		//printf("Path tracing: %4.4f \n", milliseconds);
 #endif
 
 #if STREAMCOMPACT
@@ -656,49 +709,12 @@ void pathtrace(uchar4 *pbo, int frame, int iter) {
 		cudaEventSynchronize(end);
 		cudaEventElapsedTime(&milliseconds, start, end);
 		total += milliseconds;
-		printf("Stream compaction: %4.4f \n", milliseconds);
+		stream_time += milliseconds;
+		//printf("Stream compaction: %4.4f \n", milliseconds);
+		printf("Stream compactions (paths remaining): %d\n", num_paths);
 #endif
 
 #endif
-
-
-		// --- Sort by material ---
-		// 1. Get IDs from the materials
-		// 2. Sort paths accordingly with thrust
-#if MATERIALSORT
-#if TIME
-		cudaEventCreate(&start);
-		cudaEventCreate(&end);
-		cudaEventRecord(start);
-#endif
-		findMaterialIds<<<numblocksPathSegmentTracing, blockSize1d>>>(
-			num_paths,
-			dev_materialIds,
-			dev_intersections);
-#if TIME
-		cudaEventRecord(end);
-		cudaEventSynchronize(end);
-		cudaEventElapsedTime(&milliseconds, start, end);
-		total += milliseconds;
-		printf("Material Sort (gather mat ids): %4.4f \n", milliseconds);
-#endif
-
-#if TIME
-		cudaEventCreate(&start);
-		cudaEventCreate(&end);
-		cudaEventRecord(start);
-#endif
-		thrust::sort_by_key(thrust::device, dev_materialIds, dev_materialIds + num_paths, dev_paths);
-		thrust::sort_by_key(thrust::device, dev_materialIds, dev_materialIds + num_paths, dev_intersections);
-#if TIME
-		cudaEventRecord(end);
-		cudaEventSynchronize(end);
-		cudaEventElapsedTime(&milliseconds, start, end);
-		total += milliseconds;
-		printf("Material Sort (sorting): %4.4f \n", milliseconds);
-#endif
-#endif
-
 
 		// Wait for everything to finish
 		checkCUDAError("trace one bounce");
@@ -708,12 +724,20 @@ void pathtrace(uchar4 *pbo, int frame, int iter) {
 #if STREAMCOMPACT
 		iterationComplete = num_paths == 0; // TODO: should be based off stream compaction results.
 #else
-		iterationComplete = depth > traceDepth;
+		iterationComplete = depth >= traceDepth || num_paths == 0;
 #endif
 	}
 
-	num_paths = dev_path_end - dev_paths;
+#if TIME
+	printf("Total intersect: %4.4f \n", intersect_time);
+	printf("Total pathtrace: %4.4f \n", pathtract_time);
+	printf("Total streamcompact: %4.4f \n", stream_time);
+	printf("Total materialsort: %4.4f \n", material_time);
+	printf("Total: %4.4f \n", total);
+#endif
+	
 	// Assemble this iteration and apply it to the image
+	num_paths = dev_path_end - dev_paths;
 	dim3 numBlocksPixels = (pixelcount + blockSize1d - 1) / blockSize1d;
 	finalGather<<<numBlocksPixels, blockSize1d>>>(num_paths, dev_image, dev_paths);
 
