@@ -5,7 +5,7 @@
 
 #define COSINESAMPLE 1
 #define MIS 1
-#define FRESNEL 0;
+#define FRESNEL 1;
 
 // CHECKITOUT
 /**

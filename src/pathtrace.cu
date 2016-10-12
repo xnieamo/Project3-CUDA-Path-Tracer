@@ -19,10 +19,10 @@
 #define ERRORCHECK 1
 #define DIRECTLIGHTING 1
 #define CACHEFIRSTRAY 1
-#define ANTIALIAS 1
+#define ANTIALIAS 0
 #define STREAMCOMPACT 1
 #define MATERIALSORT 0 // Doesn't work for some reason, breaks on sort_by_key
-#define TIME 1
+#define TIME 0
 #define LENSJITTER 0
 #define BLOCKSIZE 128
 
