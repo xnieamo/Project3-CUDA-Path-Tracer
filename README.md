@@ -111,7 +111,7 @@ For diffuse materials, the brdf is Lambertian. This means that rays sampled off 
 </p>
 
 ## Odd performance boost without MIS
-For some reason, taking out MIS from the code cuts the path tracing kernel runtime nearly in half! I have no idea why this happens. This is surprising because commenting out that section of the MIS code does not remove half the calculations (at least not in code).
+For some reason, taking out MIS from the code cuts the path tracing kernel runtime nearly in half! I have no idea why this happens. This is surprising because commenting out that section of the MIS code does not remove half the calculations (at least not in code). It is true though that 1 of the intersections is no longer used when MIS is disabled, so perhaps the compiler has also removed the intersection test call?
 
 <p align="center">
   With MIS.
