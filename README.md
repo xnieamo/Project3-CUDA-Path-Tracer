@@ -38,7 +38,7 @@ It is clear that the direct illumination renderer gives a much nicer image at th
 
 Shockingly, the time taken for the actual path tracing is now over 10 times greater than the basic renderer! Overall, this the direct illumination renderer takes about 3 times longer per iteration, so we could have run the basic renderer for that many more iterations giving the same time. Below, I ran the basic renderer for 1500 iterations, compared to a 500 iteration image from the direct illumination renderer. Even with 1000 extra iterations, the direct illumination renderer looks a bit better.
 
-Base Renderer 1500 iter    |  Direct Illumination 500 iter
+Base Renderer 1500 iterations    |  Direct Illumination 500 iterations
 :-------------------------:|:-------------------------:
 ![](https://github.com/xnieamo/Project3-CUDA-Path-Tracer/blob/master/img/MIS-Comparisons/basic.2016-10-11_21-52-13z.1500samp.png?raw=true)  |  ![](https://github.com/xnieamo/Project3-CUDA-Path-Tracer/blob/master/img/MIS-Comparisons/MIS.2016-10-11_20-32-42z.500samp.png?raw=true)
 
@@ -65,9 +65,11 @@ Because we are sampling for many iterations, we can also cache the rays first ca
 We save roughly 3 milliseconds per iteration when we cache the first bounces. For a 5000 iteration rendering, this amounts to roughly 15000 milliseconds save or about 43 (15000/350) additional iterations.  This seems like a fairly insignificant boost in performance, especially because caching the first ray cast will prevent us from performing anti-aliasing.
 
 ## Anti-aliasing
-If we only cast our initial ray from a single location, aliasing can occur. This is when there may be multiple objects in a single pixel but only one gets sampled. The result is that lines and boundaries in the image may appear jagged.  To address this issue, we jitter our intial ray cast slightly within the pixel. This stochastic jittering let's us sample every object that may be in a pixel since our initial ray is no longer fixed. As just mentioned in the previous section, the we can no longer cache our first bounce.  One possible solution would be to cache a large amount of initial casts. However, if we do so, we always have a higher risk of aliasing! Personally, I think the first bounce caching doesn't provide enough of a benefit to make pre-allocating a large amount of space to store so many more rays worthwhile. Below are two images, one anti-aliased, one not. Notice how the edges of the box are jagged in the non-aliased version.
+If we only cast our initial ray from a single location, aliasing can occur. This is when there may be multiple objects in a single pixel but only one gets sampled. The result is that lines and boundaries in the image may appear jagged.  To address this issue, we jitter our intial ray cast slightly within the pixel. This stochastic jittering let's us sample every object that may be in a pixel since our initial ray is no longer fixed. As just mentioned in the previous section, the we can no longer cache our first bounce.  One possible solution would be to cache a large amount of initial casts. However, if we do so, we always have a higher risk of aliasing! Personally, I think the first bounce caching doesn't provide enough of a benefit to make pre-allocating a large amount of space to store so many more rays worthwhile. Below are two images, one anti-aliased, one not. Notice how the edges of the box and the border of the spheres are jagged in the non-aliased version.
 
-IMAGE
+No Anti-alias              | With Anti-alias
+:-------------------------:|:-------------------------:
+![](https://github.com/xnieamo/Project3-CUDA-Path-Tracer/blob/master/img/noaa.2016-10-11_23-58-49z.500samp.png?raw=true)  |  ![](https://github.com/xnieamo/Project3-CUDA-Path-Tracer/blob/master/img/MIS-Comparisons/MIS.2016-10-11_20-32-42z.500samp.png?raw=true)
 
 Because anti-aliasing is something that occurs at the start of each iteration, it is essentially free! (minus 2 random number generations). Unless we were caching our initial bounces, there are no performance tradeoffs for this feature.
 
