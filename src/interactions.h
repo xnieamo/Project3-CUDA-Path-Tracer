@@ -4,7 +4,7 @@
 #include <math.h>
 
 #define COSINESAMPLE 1
-#define MIS 1
+#define MIS 0
 #define FRESNEL 1
 
 // CHECKITOUT
