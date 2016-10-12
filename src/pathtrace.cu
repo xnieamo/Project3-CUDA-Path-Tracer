@@ -19,7 +19,7 @@
 #define ERRORCHECK 1
 #define DIRECTLIGHTING 1
 #define CACHEFIRSTRAY 1
-#define ANTIALIAS 0
+#define ANTIALIAS 1
 #define STREAMCOMPACT 1
 #define MATERIALSORT 0 // Doesn't work for some reason, breaks on sort_by_key
 #define TIME 0
@@ -711,7 +711,7 @@ void pathtrace(uchar4 *pbo, int frame, int iter) {
 		total += milliseconds;
 		stream_time += milliseconds;
 		//printf("Stream compaction: %4.4f \n", milliseconds);
-		//printf("Stream compactions (paths remaining): %d\n", num_paths);
+		printf("Stream compactions (paths remaining): %d\n", num_paths);
 #endif
 
 #endif

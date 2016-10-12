@@ -51,12 +51,12 @@ ABSORPTION  3
 
 // Specular white
 MATERIAL 5
-RGB         .98 .1 .98
+RGB         .98 .98 .98
 SPECEX      0
 SPECRGB     0 1 1
-REFL        1
+REFL        0
 REFR        0
-REFRIOR     0.05
+REFRIOR     1.25
 EMITTANCE   0
 ABSORPTION  4
 
@@ -64,7 +64,7 @@ ABSORPTION  4
 CAMERA
 RES         800 800
 FOVY        45
-ITERATIONS  500
+ITERATIONS  1000
 DEPTH       8
 FILE        naa
 EYE         0.0 5 10.5

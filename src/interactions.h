@@ -5,7 +5,7 @@
 
 #define COSINESAMPLE 1
 #define MIS 1
-#define FRESNEL 1;
+#define FRESNEL 1
 
 // CHECKITOUT
 /**
@@ -333,6 +333,7 @@ thrust::default_random_engine &rng){
 	float lightPdf = -0.001f;
 	float brdfPdf = -0.001f;
 
+#if MIS
 	// We actually hit a light with our shadow feeler! Here we calculate the lighting sample.
 	if (lightIntersect.t > 0.f && lm.emittance > 0.f) {
 
@@ -343,14 +344,11 @@ thrust::default_random_engine &rng){
 		sampleBxdf(brdfContribution, brdfPdf, wi, pathSegment.ray.direction
 			, objIntersect.surfaceNormal, m, rng, 0.f);
 
-		if (lightPdf > 0.f && glm::length(lightContribution) > 0.f && brdfPdf > 0.f && glm::length(brdfContribution) > 0.f) {
+		if (lightPdf > 0.f && glm::length2(lightContribution) > 0.f && brdfPdf > 0.f && glm::length2(brdfContribution) > 0.f) {
 			float dot_pdf = glm::abs(glm::dot(wi, glm::normalize(objIntersect.surfaceNormal))) / lightPdf;
 			float w = powerHeuristic(lightPdf, brdfPdf);
 			col += w * brdfContribution * lightContribution * dot_pdf * (float)num_lights;
 		}
-	}
-	else {
-		col = glm::vec3(0.f);
 	}
 
 	// Reset variables
@@ -359,6 +357,7 @@ thrust::default_random_engine &rng){
 	lightContribution = glm::vec3(0.f);
 	lightPdf = 0.f;
 	brdfPdf = 0.f;
+#endif
 
 	// Compute brdf contribution
 	// We need to do this to find out what the throughput should be decreased by
@@ -366,37 +365,36 @@ thrust::default_random_engine &rng){
 	sampleBxdf(brdfContribution, brdfPdf, wi, pathSegment.ray.direction
 		, objIntersect.surfaceNormal, m, rng, 1.f);
 
-#if MIS
-	if (brdfPdf > 0.f && glm::length(brdfContribution) > 0.f) {
+	if (brdfIntersect.t > 0.f && bm.emittance > 0.f) {
 		// Brdf sample hit a light
-		if (brdfIntersect.t > 0.f && bm.emittance > 0.f) {
-			lightContribution = lightEnergy(wi, brdfIntersect.surfaceNormal, bm);
-			lightPdf = lightPDF(wi, brdfIntersect.surfaceNormal, brdfIntersect.intersect, brdfSample.ray.origin, brdfIntersect.surfaceArea);
+		lightContribution = lightEnergy(wi, brdfIntersect.surfaceNormal, bm);
+		lightPdf = lightPDF(wi, brdfIntersect.surfaceNormal, brdfIntersect.intersect, brdfSample.ray.origin, brdfIntersect.surfaceArea);
 
-			if (lightPdf > 0.f && glm::length(lightContribution) > 0.f) {
-				float dot_pdf = glm::max(0.f, glm::abs(glm::dot(wi, glm::normalize(objIntersect.surfaceNormal)))) / brdfPdf;
-				float w = powerHeuristic(brdfPdf, lightPdf);
-				col += w * brdfContribution * lightContribution * dot_pdf;
-			}
+		if (brdfPdf > 0.f && glm::length2(brdfContribution) > 0.f && lightPdf > 0.f && glm::length2(lightContribution) > 0.f) {
+			float dot_pdf = glm::max(0.f, glm::abs(glm::dot(wi, glm::normalize(objIntersect.surfaceNormal)))) / brdfPdf;
+			float w = powerHeuristic(brdfPdf, lightPdf);
+#if !MIS
+			w = 1.f;
+#endif
+			col += w * brdfContribution * lightContribution * dot_pdf;
 		}
 	}
-#endif
+
 	// Add new colors
 	pathSegment.color += pathSegment.throughput * col;
 
 	// Early exit
-	if (glm::length(brdfContribution) <= 0.f || brdfPdf <= 0.f) {
+	if (glm::length2(brdfContribution) <= 0.f || brdfPdf <= 0.f) {
 		pathSegment.remainingBounces = 0;
 	}
 
-	//// Russian Roulette!
-	//if (pathSegment.remainingBounces == 0) {
-	//	thrust::uniform_real_distribution<float> u01(0, 1);
-	//	float maxTP = glm::max(pathSegment.throughput[0], glm::max(pathSegment.throughput[1], pathSegment.throughput[2]));
-	//	if (u01(rng) > glm::min(0.5f, maxTP))
-	//		pathSegment.remainingBounces = 0;
-	//}
-
+	// Russian Roulette!
+	if (pathSegment.remainingBounces == 0) {
+		thrust::uniform_real_distribution<float> u01(0, 1);
+		float maxTP = glm::max(pathSegment.throughput[0], glm::max(pathSegment.throughput[1], pathSegment.throughput[2]));
+		if (u01(rng) > glm::min(0.5f, maxTP))
+			pathSegment.remainingBounces = 0;
+	}
 
 	// Update throughput
 	brdfContribution *= glm::abs(glm::dot(wi, objIntersect.surfaceNormal)) / (brdfPdf * 2.f);
@@ -409,8 +407,6 @@ thrust::default_random_engine &rng){
 		m,
 		rng);
 	pathSegment.remainingBounces--;
-
-
 }
 
 __host__ __device__
