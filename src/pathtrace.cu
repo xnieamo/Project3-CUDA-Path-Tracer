@@ -22,7 +22,7 @@
 #define ANTIALIAS 1
 #define STREAMCOMPACT 1
 #define MATERIALSORT 0 // Doesn't work for some reason, breaks on sort_by_key
-#define TIME 0
+#define TIME 1
 #define LENSJITTER 0
 #define BLOCKSIZE 128
 
@@ -321,21 +321,45 @@ __global__ void shadeMaterial(
 			else {
 
 #if DIRECTLIGHTING	
+				PathSegment brdfSample = pathSegments[idx];
+
 				thrust::uniform_real_distribution<float> u0L(0, num_lights);
 
-				// Pick a random light
+				// Pick index for light
 				int chosenLight = (int)u0L(rng);
-				Geom theLight = geoms[chosenLight];
 
 				// Do some independent operations. I think almost everything
 				// depends on this light, so just allocate some variables.
 				glm::vec4 lp = glm::vec4(0.f, 0.f, 0.f, 1.f);
-				PathSegment shadowFeeler;
-				ShadeableIntersection shadowIntersect;
-				ShadeableIntersection brdfIntersect;
+				glm::vec3 col;
+				ShadeableIntersection directLightingIntersect;
 
-				// Load pathsegment here so we save some time
-				PathSegment brdfSample = pathSegments[idx];
+				// Now we need to sample the brdf once and see if that hits the light
+				sampleBrdf(brdfSample,
+					intersection.intersect,
+					intersection.surfaceNormal,
+					material,
+					rng);
+				computeSingleIntersection(brdfSample, geoms, num_geoms, directLightingIntersect);
+
+				// Load a random light from global memory
+				Geom theLight = geoms[chosenLight];
+
+				// Solve brdf sample part
+				evaluateBxDFSample(
+					col,
+					brdfSample.ray.direction,
+					directLightingIntersect.intersect,
+					directLightingIntersect.surfaceNormal,
+					brdfSample.ray.direction,
+					pathSegments[idx].ray.direction,
+					intersection.surfaceNormal,
+					directLightingIntersect.surfaceArea,
+					directLightingIntersect.t,
+					material,
+					materials[directLightingIntersect.materialId],
+					rng
+				);
 
 				// Generate a ray pointing towards that light
 				if (theLight.type == CUBE) {
@@ -346,33 +370,35 @@ __global__ void shadeMaterial(
 				}
 
 				glm::vec3 lightPos = glm::vec3(theLight.transform * lp);
-				shadowFeeler.ray.direction = glm::normalize(lightPos - intersection.intersect);
-				shadowFeeler.ray.origin = intersection.intersect + 0.01f * shadowFeeler.ray.direction;
+				brdfSample.ray.direction = glm::normalize(lightPos - intersection.intersect);
+				brdfSample.ray.origin = intersection.intersect + 0.01f * brdfSample.ray.direction;
 
 				// This is our light intersection
-				computeSingleIntersection(shadowFeeler, geoms, num_geoms, shadowIntersect);
+				computeSingleIntersection(brdfSample, geoms, num_geoms, directLightingIntersect);
 			
-				// Now we need to sample the brdf once and see if that hits the light
-				sampleBrdf(brdfSample,
+
+				evaluateLightSample(
+					pathSegments[idx],
+					col,
+					brdfSample.ray.direction,
+					directLightingIntersect.intersect,
+					directLightingIntersect.surfaceNormal,
+					brdfSample.ray.direction,
+					intersection.surfaceNormal,
+					directLightingIntersect.surfaceArea,
+					directLightingIntersect.t,
+					num_lights,
+					material,
+					materials[directLightingIntersect.materialId],
+					rng);
+
+				// Set up new path segments
+				sampleBrdf(pathSegments[idx],
 					intersection.intersect,
 					intersection.surfaceNormal,
 					material,
 					rng);
-				computeSingleIntersection(brdfSample, geoms, num_geoms, brdfIntersect);
-
-				// Do direct lighting
-				scatterWithDirectLighting(
-					pathSegments[idx],
-					shadowFeeler,
-					brdfSample,
-					intersection,
-					shadowIntersect,
-					brdfIntersect,
-					material,
-					materials[shadowIntersect.materialId],
-					materials[brdfIntersect.materialId],
-					num_lights,
-					rng);
+				pathSegments[idx].remainingBounces--;
 
 				//pathSegments[idx].color = glm::clamp(pathSegments[idx].color, 0.f, 1.f);
 				//pathSegments[idx].color = glm::vec3(shadowIntersect.t, 0.f, 0.f)/10.f;

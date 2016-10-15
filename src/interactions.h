@@ -4,7 +4,7 @@
 #include <math.h>
 
 #define COSINESAMPLE 1
-#define MIS 0
+#define MIS 1
 #define FRESNEL 1
 
 // CHECKITOUT
@@ -237,12 +237,18 @@ PathSegment & pathSeg,
 glm::vec3 intersect,
 glm::vec3 normal,
 const Material &m,
-thrust::default_random_engine &rng
-){
-	if (m.hasReflective > 0.f) {
+thrust::default_random_engine &rng)
+{
+	thrust::uniform_real_distribution<float> u01(0, 1);
+	float matType = m.hasReflective + m.hasRefractive;
+	if (matType < 0.01f) matType = 1.f;
+
+	float r = u01(rng);
+
+	if (r < m.hasReflective / matType) {
 		pathSeg.ray.direction = glm::reflect(pathSeg.ray.direction, normal);
 	}
-	else if (m.hasRefractive > 0.f) {
+	else if (r < (m.hasRefractive + m.hasReflective) / matType) {
 		float IOR = pathSeg.inside ? m.indexOfRefraction : 1.f / m.indexOfRefraction;
 		pathSeg.inside = !pathSeg.inside;
 		pathSeg.ray.direction = glm::refract(pathSeg.ray.direction, normal, IOR);
@@ -407,6 +413,111 @@ thrust::default_random_engine &rng){
 		m,
 		rng);
 	pathSegment.remainingBounces--;
+}
+
+__host__ __device__
+void evaluateBxDFSample(
+glm::vec3 & col,
+glm::vec3 & brdfDirection,
+glm::vec3 & brdfIntersection,
+glm::vec3 & brdfNormal,
+glm::vec3 & brdfOrigin,
+glm::vec3 & pathDirection,
+glm::vec3 & objNormal,
+float sA,
+float t,
+const Material &m,
+const Material &bm,
+thrust::default_random_engine &rng)
+{
+	// Direct lighting part
+	glm::vec3 wi = glm::normalize(brdfDirection);
+	glm::vec3 lightContribution;
+	glm::vec3 brdfContribution;
+	float lightPdf = -0.001f;
+	float brdfPdf = -0.001f;
+
+	// Compute brdf contribution
+	// We need to do this to find out what the throughput should be decreased by
+	sampleBxdf(brdfContribution, brdfPdf, wi, pathDirection
+		, objNormal, m, rng, 1.f);
+
+	if (t > 0.f && bm.emittance > 0.f) {
+		// Brdf sample hit a light
+		lightContribution = lightEnergy(wi, brdfNormal, bm);
+		lightPdf = lightPDF(wi, brdfNormal, brdfIntersection, brdfOrigin, sA);
+
+		if (brdfPdf > 0.f && glm::length2(brdfContribution) > 0.f && lightPdf > 0.f && glm::length2(lightContribution) > 0.f) {
+			float dot_pdf = glm::max(0.f, glm::abs(glm::dot(wi, glm::normalize(objNormal)))) / brdfPdf;
+			float w = powerHeuristic(brdfPdf, lightPdf);
+#if !MIS
+			w = 1.f;
+#endif
+			col += w * brdfContribution * lightContribution * dot_pdf;
+		}
+	}
+}
+
+__host__ __device__
+void evaluateLightSample(
+PathSegment & pathSegment,
+glm::vec3 & col,
+glm::vec3 & lightDirection,
+glm::vec3 & lightIntersection,
+glm::vec3 & lightNormal,
+glm::vec3 & lightOrigin,
+glm::vec3 & objNormal,
+float sA,
+float t,
+int num_lights,
+const Material &m,
+const Material &lm,
+thrust::default_random_engine &rng)
+{
+
+	// Direct lighting part
+	glm::vec3 wi = glm::normalize(lightDirection);
+	glm::vec3 lightContribution;
+	glm::vec3 brdfContribution;
+	float lightPdf = -0.001f;
+	float brdfPdf = -0.001f;
+
+	// We actually hit a light with our shadow feeler! Here we calculate the lighting sample.
+	if (t > 0.f && lm.emittance > 0.f) {
+
+		lightContribution = lightEnergy(wi, lightNormal, lm);
+		lightPdf = lightPDF(wi, lightNormal, lightIntersection,
+			lightOrigin, sA);
+
+		sampleBxdf(brdfContribution, brdfPdf, wi, pathSegment.ray.direction
+			, objNormal, m, rng, 0.f);
+
+		if (lightPdf > 0.f && glm::length2(lightContribution) > 0.f && brdfPdf > 0.f && glm::length2(brdfContribution) > 0.f) {
+			float dot_pdf = glm::abs(glm::dot(wi, glm::normalize(objNormal))) / lightPdf;
+			float w = powerHeuristic(lightPdf, brdfPdf);
+			col += w * brdfContribution * lightContribution * dot_pdf * (float)num_lights;
+		}
+	}
+
+	// Add new colors
+	pathSegment.color += pathSegment.throughput * col;
+
+	// Early exit
+	if (glm::length2(brdfContribution) <= 0.f || brdfPdf <= 0.f) {
+		pathSegment.remainingBounces = 0;
+	}
+
+	// Russian Roulette!
+	if (pathSegment.remainingBounces == 0) {
+		thrust::uniform_real_distribution<float> u01(0, 1);
+		float maxTP = glm::max(pathSegment.throughput[0], glm::max(pathSegment.throughput[1], pathSegment.throughput[2]));
+		if (u01(rng) > glm::min(0.5f, maxTP))
+			pathSegment.remainingBounces = 0;
+	}
+
+	// Update throughput
+	brdfContribution *= glm::abs(glm::dot(wi, objNormal)) / (brdfPdf * 2.f);
+	pathSegment.throughput *= brdfContribution;
 }
 
 __host__ __device__
